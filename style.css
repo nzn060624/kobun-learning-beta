@@ -367,6 +367,37 @@ svg {
   font-weight: 800;
 }
 
+.attention-card {
+  padding: 20px;
+}
+
+.attention-text {
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.form-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 60px;
+  padding: 18px 20px;
+  border-radius: var(--radius-md);
+  background: var(--green);
+  color: #ffffff;
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(120, 167, 103, 0.24);
+  transition: transform 0.12s ease, filter 0.12s ease, background-color 0.12s ease, opacity 0.12s ease;
+}
+
+.form-link-btn:active {
+  transform: translateY(1px);
+  filter: brightness(1.08);
+}
+
 .footer-links {
   display: flex;
   justify-content: center;

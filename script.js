@@ -8,10 +8,19 @@
 
   const STORAGE_KEY = "tachibana-kobun-quiz-state-v1";
   const QUESTIONS_CSV_PATH = "questions.csv";
+  const ATTENTION_RTF_PATH = "attention.rtf";
+  const FORM_URL = "https://forms.gle/obWQK5bFw5nUa1rM6";
   const CORRECT_SOUND_PATH = "クイズ正解2.mp3";
   const INCORRECT_SOUND_PATH = "クイズ不正解1.mp3";
   const RESULT_SOUND_PATH = "結果画面.mp3";
   const QUIZ_LENGTH = 10;
+  const DEFAULT_ATTENTION_TEXT = [
+    "〈このサイトについて〉",
+    "このサイトはβ版です。予告なくサービスを終了する可能性があります。",
+    "問題の追加・修正により、クイズ問題のステータス（挑戦済み／未挑戦／苦手）がリセットされることがあります。",
+    "クイズ問題の不備、サイトの不具合、ご意見・ご要望等は下記のGoogleフォームからお送りください。",
+    "正式リリースは12月頃を予定しています。正式リリースされた際は、こちらのサイトでもアナウンスいたします。",
+  ].join("\n");
 
   const CATEGORY_ORDER = [
     "動詞",
@@ -48,6 +57,7 @@
 
   const appState = {
     loadError: null,
+    attentionText: DEFAULT_ATTENTION_TEXT,
     questions: [],
     history: [],
     currentView: { name: "loading", params: {} },
@@ -64,8 +74,12 @@
     renderLoading("読み込み中…");
 
     try {
-      const questions = await loadQuestionsFromCSV(QUESTIONS_CSV_PATH);
+      const [questions, attentionText] = await Promise.all([
+        loadQuestionsFromCSV(QUESTIONS_CSV_PATH),
+        loadAttentionText(ATTENTION_RTF_PATH),
+      ]);
       appState.questions = questions;
+      appState.attentionText = attentionText;
       ensureStorageInitialized(questions);
       prepareSounds();
       exposeDebugHelpers();
@@ -75,6 +89,50 @@
       appState.loadError = error;
       renderFatalError();
     }
+  }
+
+  async function loadAttentionText(path) {
+    try {
+      const response = await fetch(path, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`attention.rtf の読み込みに失敗しました: ${response.status}`);
+      }
+
+      const rtfText = await response.text();
+      return parseRTFToPlainText(rtfText) || DEFAULT_ATTENTION_TEXT;
+    } catch (error) {
+      console.warn("attention.rtf を読み込めないため初期文言を表示します", error);
+      return DEFAULT_ATTENTION_TEXT;
+    }
+  }
+
+  function parseRTFToPlainText(rtfText) {
+    const firstUnicodeIndex = rtfText.search(/\\u-?\d+/);
+    const sourceText = firstUnicodeIndex >= 0 ? rtfText.slice(firstUnicodeIndex) : rtfText;
+    let text = sourceText
+      .replace(/\\u(-?\d+)\s?/g, (_, code) => {
+        const value = Number(code);
+        const normalized = value < 0 ? value + 65536 : value;
+        return String.fromCharCode(normalized);
+      })
+      .replace(/\\'[0-9a-fA-F]{2}/g, "")
+      .replace(/\\\s*\r?\n/g, "\n")
+      .replace(/\\(?:par|line)\b/g, "\n")
+      .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
+      .replace(/\\[\\{}]/g, match => match.slice(1))
+      .replace(/[{}]/g, "")
+      .replace(/\\/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    text = text
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .join("\n");
+
+    return text;
   }
 
   async function loadQuestionsFromCSV(path) {
@@ -688,10 +746,13 @@
           </div>
         </section>
 
-        <div class="footer-links">
-          <button class="footer-link" id="go-about">このサイトについて</button>
-          <button class="footer-link" id="dummy-report">問題報告</button>
-        </div>
+        <section class="card attention-card">
+          <div class="attention-text">${formatMultilineText(appState.attentionText)}</div>
+        </section>
+
+        <a class="form-link-btn" href="${escapeAttr(FORM_URL)}" target="_blank" rel="noopener noreferrer">
+          フォームはこちら
+        </a>
 
         <div class="dialog-backdrop" id="reset-dialog" hidden>
           <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="reset-dialog-title">
@@ -982,14 +1043,6 @@
       startQuiz("weak");
     });
 
-    document.getElementById("go-about")?.addEventListener("click", () => {
-      goTo("about");
-    });
-
-    document.getElementById("dummy-report")?.addEventListener("click", () => {
-      alert("問題報告は現在準備中です。");
-    });
-
     const dialog = document.getElementById("reset-dialog");
     document.getElementById("open-reset-dialog")?.addEventListener("click", () => {
       if (dialog) dialog.hidden = false;
@@ -1136,6 +1189,10 @@
 
   function formatHonbun(value) {
     return escapeHTML(value).replace(/&lt;([^&<>]+)&gt;/g, "<u>$1</u>");
+  }
+
+  function formatMultilineText(value) {
+    return escapeHTML(value).replace(/\n/g, "<br>");
   }
 
   function escapeHTML(value) {
