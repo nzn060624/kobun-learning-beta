@@ -8,19 +8,19 @@
 
   const STORAGE_KEY = "tachibana-kobun-quiz-state-v1";
   const QUESTIONS_CSV_PATH = "questions.csv";
-  const ATTENTION_RTF_PATH = "attention.rtf";
+  const ATTENTION_HTML_PATH = "attention.html";
   const FORM_URL = "https://forms.gle/obWQK5bFw5nUa1rM6";
   const CORRECT_SOUND_PATH = "クイズ正解2.mp3";
   const INCORRECT_SOUND_PATH = "クイズ不正解1.mp3";
   const RESULT_SOUND_PATH = "結果画面.mp3";
   const QUIZ_LENGTH = 10;
-  const DEFAULT_ATTENTION_TEXT = [
-    "〈このサイトについて〉",
-    "このサイトはβ版です。予告なくサービスを終了する可能性があります。",
-    "問題の追加・修正により、クイズ問題のステータス（挑戦済み／未挑戦／苦手）がリセットされることがあります。",
-    "クイズ問題の不備、サイトの不具合、ご意見・ご要望等は下記のGoogleフォームからお送りください。",
-    "正式リリースは12月頃を予定しています。正式リリースされた際は、こちらのサイトでもアナウンスいたします。",
-  ].join("\n");
+  const DEFAULT_ATTENTION_HTML = `
+    <p>〈このサイトについて〉</p>
+    <p>・このサイトはβ版です。予告なくサービスを終了する可能性があります。</p>
+    <p>・問題の追加・修正により、クイズ問題のステータス（挑戦済み／未挑戦／苦手）がリセットされることがあります。</p>
+    <p>・クイズ問題の不備、サイトの不具合、ご意見・ご要望等は下記のGoogleフォームからお送りください。</p>
+    <p>・正式リリースは12月頃を予定しています。</p>
+  `;
 
   const CATEGORY_ORDER = [
     "動詞",
@@ -57,7 +57,7 @@
 
   const appState = {
     loadError: null,
-    attentionText: DEFAULT_ATTENTION_TEXT,
+    attentionHTML: DEFAULT_ATTENTION_HTML,
     questions: [],
     history: [],
     currentView: { name: "loading", params: {} },
@@ -74,12 +74,12 @@
     renderLoading("読み込み中…");
 
     try {
-      const [questions, attentionText] = await Promise.all([
+      const [questions, attentionHTML] = await Promise.all([
         loadQuestionsFromCSV(QUESTIONS_CSV_PATH),
-        loadAttentionText(ATTENTION_RTF_PATH),
+        loadAttentionHTML(ATTENTION_HTML_PATH),
       ]);
       appState.questions = questions;
-      appState.attentionText = attentionText;
+      appState.attentionHTML = attentionHTML;
       ensureStorageInitialized(questions);
       prepareSounds();
       exposeDebugHelpers();
@@ -91,48 +91,50 @@
     }
   }
 
-  async function loadAttentionText(path) {
+  async function loadAttentionHTML(path) {
     try {
       const response = await fetch(path, { cache: "no-store" });
       if (!response.ok) {
-        throw new Error(`attention.rtf の読み込みに失敗しました: ${response.status}`);
+        throw new Error(`attention.html の読み込みに失敗しました: ${response.status}`);
       }
 
-      const rtfText = await response.text();
-      return parseRTFToPlainText(rtfText) || DEFAULT_ATTENTION_TEXT;
+      const htmlText = await response.text();
+      return extractAttentionBodyHTML(htmlText) || DEFAULT_ATTENTION_HTML;
     } catch (error) {
-      console.warn("attention.rtf を読み込めないため初期文言を表示します", error);
-      return DEFAULT_ATTENTION_TEXT;
+      console.warn("attention.html を読み込めないため初期文言を表示します", error);
+      return DEFAULT_ATTENTION_HTML;
     }
   }
 
-  function parseRTFToPlainText(rtfText) {
-    const firstUnicodeIndex = rtfText.search(/\\u-?\d+/);
-    const sourceText = firstUnicodeIndex >= 0 ? rtfText.slice(firstUnicodeIndex) : rtfText;
-    let text = sourceText
-      .replace(/\\u(-?\d+)\s?/g, (_, code) => {
-        const value = Number(code);
-        const normalized = value < 0 ? value + 65536 : value;
-        return String.fromCharCode(normalized);
-      })
-      .replace(/\\'[0-9a-fA-F]{2}/g, "")
-      .replace(/\\\s*\r?\n/g, "\n")
-      .replace(/\\(?:par|line)\b/g, "\n")
-      .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
-      .replace(/\\[\\{}]/g, match => match.slice(1))
-      .replace(/[{}]/g, "")
-      .replace(/\\/g, "")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+  function extractAttentionBodyHTML(htmlText) {
+    const doc = new DOMParser().parseFromString(htmlText, "text/html");
+    doc.querySelectorAll("script, style, link, meta, title").forEach(element => element.remove());
 
-    text = text
-      .split("\n")
-      .map(line => line.trim())
-      .filter(Boolean)
-      .join("\n");
+    const body = doc.body;
+    if (!body) return "";
 
-    return text;
+    body.querySelectorAll("*").forEach(element => {
+      [...element.attributes].forEach(attribute => {
+        element.removeAttribute(attribute.name);
+      });
+
+      const text = element.textContent.trim();
+      if (element.tagName === "P") {
+        if (!text) {
+          element.classList.add("attention-spacer");
+        } else if (text.startsWith("・")) {
+          element.classList.add("attention-bullet");
+        } else if (text.startsWith("〈") && text.endsWith("〉")) {
+          element.classList.add("attention-heading");
+        }
+      } else if (element.tagName === "UL") {
+        element.classList.add("attention-list");
+      } else if (element.tagName === "LI") {
+        element.classList.add("attention-list-item");
+      }
+    });
+
+    return body.innerHTML.trim();
   }
 
   async function loadQuestionsFromCSV(path) {
@@ -747,7 +749,7 @@
         </section>
 
         <section class="card attention-card">
-          <div class="attention-text">${formatMultilineText(appState.attentionText)}</div>
+          <div class="attention-content">${appState.attentionHTML}</div>
         </section>
 
         <a class="form-link-btn" href="${escapeAttr(FORM_URL)}" target="_blank" rel="noopener noreferrer">
@@ -1189,10 +1191,6 @@
 
   function formatHonbun(value) {
     return escapeHTML(value).replace(/&lt;([^&<>]+)&gt;/g, "<u>$1</u>");
-  }
-
-  function formatMultilineText(value) {
-    return escapeHTML(value).replace(/\n/g, "<br>");
   }
 
   function escapeHTML(value) {
